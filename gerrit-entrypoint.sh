@@ -13,19 +13,24 @@ if [ -n "${JAVA_HEAPLIMIT}" ]; then
   JAVA_MEM_OPTIONS="-Xmx${JAVA_HEAPLIMIT}"
 fi
 
+# If BASEPATH (path to where store git repos) isn't set then default to ${GERRIT_SITE}/git
+BASEPATH=${BASEPATH:-${GERRIT_SITE}/git}
+
 if [ "$1" = "/gerrit-start.sh" ]; then
   # If you're mounting ${GERRIT_SITE} to your host, you this will default to root.
   # This obviously ensures the permissions are set correctly for when gerrit starts.
   chown -R ${GERRIT_USER} "${GERRIT_SITE}"
 
-  # Initialize Gerrit if ${GERRIT_SITE}/git is empty.
-  if [ -z "$(ls -A "$GERRIT_SITE/git")" ]; then
+  # Initialize Gerrit if ${GERRIT_SITE} is empty.
+  if [ -z "$(ls -A "${GERRIT_SITE}")" ]; then
     echo "First time initialize gerrit..."
     su-exec ${GERRIT_USER} java ${JAVA_OPTIONS} ${JAVA_MEM_OPTIONS} -jar "${GERRIT_WAR}" init --batch --no-auto-start -d "${GERRIT_SITE}" ${GERRIT_INIT_ARGS}
-    #All git repositories must be removed when database is set as postgres or mysql
-    #in order to be recreated at the secondary init below.
-    #Or an execption will be thrown on secondary init.
-    [ ${#DATABASE_TYPE} -gt 0 ] && rm -rf "${GERRIT_SITE}/git"
+    # During first init gerrit will create basis repos - All-Project and All-Users. As of now it will not recreate them during the second init when we update BASEPATH
+    # so if we have a custom BASEPATH then we want to copy those project to there unless they already exists
+    if [ "${BASEPATH}" != "${GERRIT_SITE}/git" ]; then
+      [ ! -d "${BASEPATH}/All-Projects.git" ] && cp -rf ${GERRIT_SITE}/git/All-Projects.git ${BASEPATH}/All-Projects.git
+      [ ! -d "${BASEPATH}/All-Users.git" ] && cp -rf ${GERRIT_SITE}/git/All-Users.git ${BASEPATH}/All-Users.git
+    fi
   fi
 
   # Install external plugins
@@ -52,6 +57,7 @@ if [ "$1" = "/gerrit-start.sh" ]; then
   #Section gerrit
   [ -z "${WEBURL}" ] || set_gerrit_config gerrit.canonicalWebUrl "${WEBURL}"
   [ -z "${GITHTTPURL}" ] || set_gerrit_config gerrit.gitHttpUrl "${GITHTTPURL}"
+  [ -z "${BASEPATH}" ] || set_gerrit_config gerrit.basePath "${BASEPATH}"
 
   #Section sshd
   [ -z "${LISTEN_ADDR}" ] || set_gerrit_config sshd.listenAddress "${LISTEN_ADDR}"
